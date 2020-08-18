@@ -15,6 +15,8 @@ class ODriveNode(Node):
     def __init__(self):
         super().__init__('odrive_node')
         self.driver: odrive.fibre.remote_object.RemoteObject = None
+        self.left_axis = None
+        self.right_axis = None
         self.declare_parameter('axis0_as_right', True, ParameterDescriptor(
             type=ParameterType.PARAMETER_BOOL, description='Use axis0 as right axis?'))
         self.declare_parameter('wheel.track', 0.400, ParameterDescriptor(
@@ -60,21 +62,23 @@ class ODriveNode(Node):
         right_turns = (msg.linear.x + diff_vel) / (2 * pi *
                                                    self.get_parameter('wheel.radius').get_parameter_value().double_value)
 
-        if self.get_parameter('axis0_as_right').get_parameter_value().bool_value:
-            self.driver.axis0.input_vel = right_turns
-            self.driver.axis1.input_vel = left_turns
-        else:
-            self.driver.axis0.input_vel = left_turns
-            self.driver.axis1.input_vel = right_turns
+        self.left_axis.input_vel = left_turns
+        self.right_axis.input_vel = right_turns
 
-        self.driver.axis0.watchdog_feed()
-        self.driver.axis1.watchdog_feed()
+        self.left_axis.watchdog_feed()
+        self.right_axis.watchdog_feed()
 
     def connect_odrive_callback(self, request: Trigger.Request, response: Trigger.Response):
         try:
             self.driver = odrive.find_any(timeout=15)
             response.success = True
             response.message = f"Connected to {self.driver.serial_number}"
+            if self.get_parameter('axis0_as_right').get_parameter_value().bool_value:
+                self.left_axis = self.driver.axis1
+                self.right_axis = self.driver.axis0
+            else:
+                self.left_axis = self.driver.axis0
+                self.right_axis = self.driver.axis1
             if not self.driver.user_config_loaded:
                 self.get_logger().warn("ODrive user config not loaded")
         except TimeoutError:
