@@ -8,19 +8,18 @@ from std_msgs.msg import Float32
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import Twist
 from std_srvs.srv import Trigger
+from odrive_interfaces.srv import AxisState, PositionControl, VelocityControl
 
 import odrive
+from odrive.enums import *
+from fibre.protocol import ChannelBrokenException
 
 
 class ODriveNode(Node):
     def __init__(self):
         super().__init__('odrive_node')
-        self.declare_parameter('axis0_as_right', True, ParameterDescriptor(
-            type=ParameterType.PARAMETER_BOOL, description='Use axis0 as right axis?'))
-        self.declare_parameter('wheel.track', 0.400, ParameterDescriptor(
-            type=ParameterType.PARAMETER_DOUBLE, description='Distance between wheel centers in meter'))
-        self.declare_parameter('wheel.radius', 0.165 / 2, ParameterDescriptor(
-            type=ParameterType.PARAMETER_DOUBLE, description='Wheel radius in meter'))
+        self.declare_parameter('connection.timeout', 15, ParameterDescriptor(
+            type=ParameterType.PARAMETER_INTEGER, description='ODrive connection timeout in seconds'))
         self.declare_parameter('battery.max_voltage', 4.2 * 6, ParameterDescriptor(
             type=ParameterType.PARAMETER_DOUBLE, description='Max battery voltage'))
         self.declare_parameter('battery.min_voltage', 3.2 * 6, ParameterDescriptor(
@@ -28,17 +27,28 @@ class ODriveNode(Node):
         self.declare_parameter('joint_state.topic', 'joint_state', ParameterDescriptor(
             type=ParameterType.PARAMETER_STRING, description='Joint State publisher topic'))
 
-        self.cmd_vel_subscription = self.create_subscription(
-            Twist,
-            'cmd_vel',
-            self.cmd_vel_listener_callback,
-            2
-        )
-
         self.connect_odrive_service = self.create_service(
             Trigger,
             'connect_odrive',
             self.connect_odrive_callback
+        )
+
+        self.request_state_service = self.create_service(
+            AxisState,
+            'request_state',
+            self.request_state_callback
+        )
+
+        self.position_cmd_service = self.create_service(
+            PositionControl,
+            'position_cmd',
+            self.position_cmd_callback
+        )
+
+        self.velocity_cmd_service = self.create_service(
+            VelocityControl,
+            'velocity_cmd',
+            self.velocity_cmd_callback
         )
 
         self.battery_percentage_publisher_ = self.create_publisher(
@@ -63,41 +73,118 @@ class ODriveNode(Node):
         )
 
         self.driver: odrive.fibre.remote_object.RemoteObject = None
-        self.left_axis = None
-        self.right_axis = None
 
-    def distance_per_turn(self):
-        return 2 * pi * self.get_parameter('wheel.radius').get_parameter_value().double_value
+    def is_driver_ready(self):
+        if self.driver:
+            try:
+                if self.driver.user_config_loaded:
+                    return True
+                else:
+                    self.get_logger().warn('ODrive user config not loaded')
+                    return False
+            except ChannelBrokenException:
+                self.driver = None
+                self.get_logger().warn('ODrive disconnected')
+                return False
+            except:
+                self.get_logger().error('Unexpected error:', sys.exc_info()[0])
+                return False
+        else:
+            self.get_logger().debug('ODrive not connected')
+            return False
 
-    def cmd_vel_listener_callback(self, msg: Twist):
-        self.get_logger().info(
-            f'lin_vel: {msg.linear.x} angle_vel: {msg.angular.z}')
-        diff_vel = msg.angular.z * \
-            self.get_parameter(
-                'wheel.track').get_parameter_value().double_value / 2
-        left_turns = (msg.linear.x - diff_vel) / self.distance_per_turn()
-        right_turns = (msg.linear.x + diff_vel) / self.distance_per_turn()
-        self.left_axis.input_vel = left_turns
-        self.right_axis.input_vel = right_turns
+    """
+    AXIS_STATE_UNDEFINED = 0
+    AXIS_STATE_IDLE = 1
+    AXIS_STATE_STARTUP_SEQUENCE = 2
+    AXIS_STATE_FULL_CALIBRATION_SEQUENCE = 3
+    AXIS_STATE_MOTOR_CALIBRATION = 4
+    AXIS_STATE_SENSORLESS_CONTROL = 5
+    AXIS_STATE_ENCODER_INDEX_SEARCH = 6
+    AXIS_STATE_ENCODER_OFFSET_CALIBRATION = 7
+    AXIS_STATE_CLOSED_LOOP_CONTROL = 8
+    AXIS_STATE_LOCKIN_SPIN = 9
+    AXIS_STATE_ENCODER_DIR_FIND = 10
+    """
+    def request_state_callback(self, request: AxisState.Request, response: AxisState.Response):
+        if self.is_driver_ready():
+            if request.axis == 0:
+                self.driver.axis0.requested_state = request.state
+                self.driver.axis0.watchdog_feed()
+                response.success = True
+                response.state = self.driver.axis0.current_state
+                response.message = f'Success'
+            elif request.axis == 1:
+                self.driver.axis1.requested_state = request.state
+                self.driver.axis1.watchdog_feed()
+                response.success = True
+                response.state = self.driver.axis0.current_state
+                response.message = f'Success'
+            else:
+                response.success = False
+                response.message = f'Axis not exist'
+        else:
+            response.success = False
+            response.message = f'ODrive not ready'
+        
+        return response
 
-        self.left_axis.watchdog_feed()
-        self.right_axis.watchdog_feed()
+    def position_cmd_callback(self, request: PositionControl.Request, response: PositionControl.Response):
+        if self.is_driver_ready():
+            if request.axis == 0:
+                self.driver.axis0.controller.input_pos = request.turns
+                self.driver.axis0.watchdog_feed()
+                response.success = True
+                response.message = f'Success'
+            elif request.axis == 1:
+                self.driver.axis1.controller.input_pos = request.turns
+                self.driver.axis1.watchdog_feed()
+                response.success = True
+                response.message = f'Success'
+            else:
+                response.success = False
+                response.message = f'Axis not exist'
+        else:
+            response.success = False
+            response.message = f'ODrive not ready'
+        
+        return response
+
+    def velocity_cmd_callback(self, request: VelocityControl.Request, response: VelocityControl.Response):
+        if self.is_driver_ready():
+            if request.axis == 0:
+                self.driver.axis0.controller.input_vel = request.turns_s
+                self.driver.axis0.watchdog_feed()
+                response.success = True
+                response.message = f'Success'
+            elif request.axis == 1:
+                self.driver.axis1.controller.input_vel = request.turns_s
+                self.driver.axis1.watchdog_feed()
+                response.success = True
+                response.message = f'Success'
+            else:
+                response.success = False
+                response.message = f'Axis not exist'
+        else:
+            response.success = False
+            response.message = f'ODrive not ready'
+        
+        return response
 
     def connect_odrive_callback(self, request: Trigger.Request, response: Trigger.Response):
         try:
             self.get_logger().info('Connecting to ODrive')
-            self.driver = odrive.find_any(timeout=15)
+            self.driver = odrive.find_any(
+                timeout=self.get_parameter(
+                    'connection.timeout'
+                ).get_parameter_value().integer_value)
             self.get_logger().info('ODrive connected')
             response.success = True
             response.message = f'Connected to {self.driver.serial_number}'
-            if self.get_parameter('axis0_as_right').get_parameter_value().bool_value:
-                self.left_axis = self.driver.axis1
-                self.right_axis = self.driver.axis0
-            else:
-                self.left_axis = self.driver.axis0
-                self.right_axis = self.driver.axis1
             if not self.driver.user_config_loaded:
                 self.get_logger().warn('ODrive user config not loaded')
+            self.driver.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+            self.driver.axis1.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
         except TimeoutError:
             response.success = False
             response.message = 'Timeout'
@@ -108,8 +195,8 @@ class ODriveNode(Node):
         return response
 
     def battery_percentage_publisher_callback(self):
-        msg = Float32()
-        if self.driver:
+        if self.is_driver_ready():
+            msg = Float32()
             msg.data = (
                 self.driver.vbus_voltage -
                 self.get_parameter(
@@ -122,10 +209,10 @@ class ODriveNode(Node):
                 self.get_logger().warn(
                     f'ODrive battery percentage low: {msg.data:0.2f}')
         else:
-            self.get_logger().debug('ODrive not connected')
+            self.get_logger().debug('ODrive not ready')
 
     def joint_state_publisher_callback(self):
-        if self.driver:
+        if self.is_driver_ready():
             msg = JointState()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.position = [self.driver.axis0.encoder.pos_estimate,
@@ -134,7 +221,7 @@ class ODriveNode(Node):
                             self.driver.axis1.encoder.vel_estimate]
             self.joint_state_publisher_.publish(msg)
         else:
-            self.get_logger().debug('ODrive not connected')
+            self.get_logger().debug('ODrive not ready')
 
 
 def main():
