@@ -8,9 +8,11 @@ ROS2 node for ODrive (Firmware version >= v0.5.1)
 
 ### Install from source
 ```bash
-# Get node
+# Create workspace
 mkdir -p ~/ros2_ws/src
 cd ~/ros2_ws/src
+
+# Get node
 git clone https://github.com/skymaze/odrive_ros2.git
 
 # Get interface
