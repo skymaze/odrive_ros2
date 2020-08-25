@@ -24,6 +24,8 @@ class ODriveNode(Node):
             type=ParameterType.PARAMETER_DOUBLE, description='Max battery voltage'))
         self.declare_parameter('battery.min_voltage', 3.2 * 6, ParameterDescriptor(
             type=ParameterType.PARAMETER_DOUBLE, description='Min battery voltage'))
+        self.declare_parameter('battery.topic', 'barrery_percentage', ParameterDescriptor(
+            type=ParameterType.PARAMETER_STRING, description='Battery percentage publisher topic'))
         self.declare_parameter('joint_state.topic', 'joint_state', ParameterDescriptor(
             type=ParameterType.PARAMETER_STRING, description='Joint State publisher topic'))
 
@@ -53,7 +55,8 @@ class ODriveNode(Node):
 
         self.battery_percentage_publisher_ = self.create_publisher(
             Float32,
-            'barrery_percentage',
+            self.get_parameter(
+                'battery.topic').get_parameter_value().string_value,
             1
         )
         self.battery_percentage_publisher_timer = self.create_timer(

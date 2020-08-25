@@ -3,7 +3,7 @@
 <package format="3">
   <name>odrive_ros2</name>
   <version>0.0.1</version>
-  <description>ROS2 node for odrive</description>
+  <description>ROS2 node for ODrive</description>
   <maintainer email="maze1024@gmail.com">Jiang Yue</maintainer>
   <license>MIT</license>
 

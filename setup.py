@@ -4,7 +4,7 @@ package_name = 'odrive_ros2'
 
 setup(
     name=package_name,
-    version='0.0.0',
+    version='0.0.1',
     packages=[package_name],
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -15,7 +15,7 @@ setup(
     zip_safe=True,
     maintainer='Jiang Yue',
     maintainer_email='maze1024@gmail.com',
-    description='ROS2 node for odrive',
+    description='ROS2 node for ODrive',
     license='MIT',
     tests_require=['pytest'],
     entry_points={
