@@ -12,7 +12,6 @@ from odrive_interfaces.srv import AxisState, PositionControl, VelocityControl
 
 import odrive
 from odrive.enums import *
-from fibre.protocol import ChannelBrokenException
 
 
 class ODriveNode(Node):
@@ -85,10 +84,6 @@ class ODriveNode(Node):
                 else:
                     self.get_logger().warn('ODrive user config not loaded')
                     return False
-            except ChannelBrokenException:
-                self.driver = None
-                self.get_logger().warn('ODrive disconnected')
-                return False
             except:
                 self.get_logger().error('Unexpected error:', sys.exc_info()[0])
                 return False
